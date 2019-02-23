@@ -930,6 +930,10 @@ ngx_http_lua_ffi_ssl_generate_certificate_sign_request(
 
         int             nVersion = 1;
 
+        char*           subject_alt_name = NULL;
+        STACK_OF(X509_EXTENSION) *exts = NULL;
+        X509_EXTENSION  *ex;
+
         bio = BIO_new_mem_buf((char *) data, data_len);
         if (bio == NULL) {
             *err = "BIO_new_mem_buf() failed";
@@ -975,6 +979,23 @@ ngx_http_lua_ffi_ssl_generate_certificate_sign_request(
             goto failed;
         }
 
+        subject_alt_name = malloc(strlen(info->common_name) + 15);
+        if (subject_alt_name == NULL) {
+            *err = "allocation for subject_alt_name failed";
+            goto failed;
+        }
+        strcpy(subject_alt_name, "DNS:");
+        strcat(subject_alt_name, info->common_name);
+
+        exts = sk_X509_EXTENSION_new_null();
+        ex = X509V3_EXT_conf_nid(NULL, NULL, NID_subject_alt_name, subject_alt_name);
+        if (!ex) {
+            *err = "X509V3_EXT_conf_nid() for common name failed";
+            goto failed;
+        }
+        sk_X509_EXTENSION_push(exts, ex);
+        X509_REQ_add_extensions(x509_req, exts);
+
         if (X509_REQ_set_pubkey(x509_req, pkey) != 1) {
             *err = "X509_REQ_set_pubkey() failed";
             goto failed;
@@ -1008,6 +1029,8 @@ ngx_http_lua_ffi_ssl_generate_certificate_sign_request(
 
         *out_size = len;
 
+        sk_X509_EXTENSION_pop_free(exts, X509_EXTENSION_free);
+        free(subject_alt_name);
         X509_REQ_free(x509_req);
         EVP_PKEY_free(pkey);
         BIO_free(bio);
@@ -1026,6 +1049,14 @@ failed:
 
         if (x509_req) {
                 X509_REQ_free(x509_req);
+        }
+
+        if (subject_alt_name) {
+                free(subject_alt_name);
+        }
+
+        if (exts) {
+                sk_X509_EXTENSION_pop_free(exts, X509_EXTENSION_free);
         }
 
         return rc;
@@ -1131,6 +1162,10 @@ ngx_http_lua_ffi_ssl_sign_certificate_sign_request(
         EVP_PKEY    *pkey = NULL;
         X509_NAME   *subject_name = NULL;
 
+        int         subjAltName_pos;
+        X509_EXTENSION *subjAltName;
+        STACK_OF (X509_EXTENSION) * req_exts;
+
         if (!loadX509(cadata, calen, &ca)) {
             *err = "loadX509() failed";
             goto failed;
@@ -1170,8 +1205,20 @@ ngx_http_lua_ffi_ssl_sign_certificate_sign_request(
             goto failed;
         }
 
+        if (!(req_exts = X509_REQ_get_extensions (req))) {
+            *err = "X509_REQ_get_extensions() failed";
+            goto failed;
+        }
+        subjAltName_pos = X509v3_get_ext_by_NID (req_exts, OBJ_sn2nid ("subjectAltName"), -1);
+        subjAltName = X509v3_get_ext (req_exts, subjAltName_pos);
+
         if (X509_set_pubkey(cert, X509_REQ_get_pubkey(req)) == 0) {
             *err = "X509_set_pubkey() failed";
+            goto failed;
+        }
+
+        if (!X509_add_ext (cert, subjAltName, -1)) {
+            *err = "X509_add_ext() failed";
             goto failed;
         }
 
