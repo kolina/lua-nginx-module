@@ -110,7 +110,7 @@ ngx_http_lua_ngx_req_read_body(lua_State *L)
     }
 
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
-            "lua start to read buffered request body");
+                   "lua start to read buffered request body");
 
     rc = ngx_http_read_client_request_body(r, ngx_http_lua_req_body_post_read);
 
@@ -142,7 +142,7 @@ ngx_http_lua_ngx_req_read_body(lua_State *L)
                        "interruptions");
 
         ctx->waiting_more_body = 1;
-        ctx->downstream_co_ctx = coctx;
+        ctx->downstream = coctx;
 
         ngx_http_lua_cleanup_pending_operation(coctx);
         coctx->cleanup = ngx_http_lua_req_body_cleanup;
@@ -176,7 +176,7 @@ ngx_http_lua_req_body_post_read(ngx_http_request_t *r)
     if (ctx->waiting_more_body) {
         ctx->waiting_more_body = 0;
 
-        coctx = ctx->downstream_co_ctx;
+        coctx = ctx->downstream;
         ctx->cur_co_ctx = coctx;
 
         coctx->cleanup = NULL;
@@ -332,7 +332,7 @@ ngx_http_lua_ngx_req_get_body_file(lua_State *L)
        r->request_body->bufs->buf->memory,
        r->request_body->bufs->buf->temporary,
        (int) (r->request_body->bufs->buf->end -
-       r->request_body->bufs->buf->pos),
+              r->request_body->bufs->buf->pos),
        (int) ngx_buf_size(r->request_body->bufs->buf));
 
     lua_pushlstring(L, (char *) r->request_body->temp_file->file.name.data,
